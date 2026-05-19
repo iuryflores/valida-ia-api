@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { OcrJob } from './schemas/ocr-job.schema';
@@ -6,15 +6,19 @@ import { OcrAto } from './schemas/ocr-ato.schema';
 import { OCRResult } from './types/ocr-result.type';
 import { precisaRevisaoIA } from './utils/precisa-revisao-ia.util';
 import { removerAssinaturaFinal } from './utils/remover-assinatura.utils';
+import { OcrIaFilaService } from './ocr-ia-fila.service';
 
 @Injectable()
 export class OcrPersistenciaService {
+  private readonly logger = new Logger(OcrPersistenciaService.name);
   constructor(
     @InjectModel(OcrJob.name)
     private readonly ocrJobModel: Model<OcrJob>,
 
     @InjectModel(OcrAto.name)
     private readonly ocrAtoModel: Model<OcrAto>,
+
+    private readonly ocrIaFilaService: OcrIaFilaService,
   ) {}
 
   async salvarResultado(
@@ -67,6 +71,7 @@ export class OcrPersistenciaService {
     }));
 
     await this.ocrAtoModel.bulkWrite(operations);
+    await this.enfileirarAtosPendentesIA(jobId);
   }
 
   async salvarErro(jobId: string, erro: unknown, nomeArquivo?: string) {
@@ -153,5 +158,41 @@ export class OcrPersistenciaService {
       },
       { returnDocument: 'after' },
     );
+  }
+
+  async enfileirarAtosPendentesIA(jobId: string) {
+    const atosPendentes = await this.ocrAtoModel
+      .find({
+        jobId,
+        status: 'PENDENTE_IA',
+      })
+      .select('_id')
+      .lean();
+
+    for (const ato of atosPendentes) {
+      await this.ocrIaFilaService.enfileirarAto(ato._id.toString());
+    }
+  }
+
+  async reenfileirarTodosPendentesIA(limit = 100) {
+    this.logger.log(`Buscando atos PENDENTE_IA (limit=${limit})`);
+
+    const atosPendentes = await this.ocrAtoModel
+      .find({ status: 'PENDENTE_IA' })
+      .select('_id jobId numero_ato')
+      .limit(limit)
+      .lean();
+
+    this.logger.log(`Encontrados ${atosPendentes.length} atos pendentes`);
+
+    for (const ato of atosPendentes) {
+      this.logger.log(`Enfileirando ato ${ato.numero_ato} (${ato._id})`);
+
+      await this.ocrIaFilaService.enfileirarAto(ato._id.toString());
+    }
+
+    return {
+      totalEnfileirados: atosPendentes.length,
+    };
   }
 }

@@ -15,6 +15,7 @@ import type { Express } from 'express';
 import { OcrPersistenciaService } from './ocr-persistencia.service';
 import { OcrIaService } from './ocr-ia.service';
 import { normalizarDocumentosOCR } from './utils/corrigir-cpj-cnpj.util';
+import { OcrFilaService } from './ocr-fila.service';
 
 @Controller('ocr')
 export class OcrController {
@@ -22,6 +23,7 @@ export class OcrController {
     private readonly ocrService: OcrService,
     private readonly ocrPersistenciaService: OcrPersistenciaService,
     private readonly ocrIaService: OcrIaService,
+    private readonly ocrFilaService: OcrFilaService,
   ) {}
 
   @Post('pdf')
@@ -77,5 +79,18 @@ export class OcrController {
     });
 
     return this.ocrPersistenciaService.salvarRevisaoIA(id, revisao);
+  }
+
+  @Post('fila')
+  @UseInterceptors(FileInterceptor('file'))
+  async enviarParaFila(@UploadedFile() file: Express.Multer.File) {
+    return this.ocrFilaService.enfileirarPdf(file);
+  }
+
+  @Post('atos/pendentes-ia/reenfileirar')
+  async reenfileirarPendentesIA(@Query('limit') limit?: string) {
+    return this.ocrPersistenciaService.reenfileirarTodosPendentesIA(
+      limit ? Number(limit) : 100,
+    );
   }
 }
